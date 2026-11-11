@@ -1,0 +1,36 @@
+#!/bin/bash
+
+%{if os_distro == "ubuntu" && os_version == "resolute"}
+# Ubuntu 26.04 (resolute) uses sudo-rs (the new Rust sudo). By default it runs each
+# command in its own terminal (use_pty); over the SSM connection that stops Ansible
+# from detecting when a `sudo` command finished, so every become task times out and
+# the host shows UNREACHABLE. Turning use_pty off fixes it. Harmless on classic sudo.
+echo 'Defaults !use_pty' > /etc/sudoers.d/99-disable-use-pty
+chmod 440 /etc/sudoers.d/99-disable-use-pty
+%{endif}
+
+%{if os_distro == "centos" || os_distro == "rockylinux"}
+%{if os_version == 7}
+sudo sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*
+sudo sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
+sudo yum distro-sync -y
+%{endif}
+%{if os_version == 8}
+sudo sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*
+sudo sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
+sudo dnf distro-sync
+%{endif}
+sudo %{if os_version == 7}yum%{else}dnf%{endif} install -y https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/linux_%{if arch == "x86_64"}amd64%{else}arm64%{endif}/amazon-ssm-agent.rpm
+%{endif}
+
+%{if os_distro == "debian"}
+mkdir -p /tmp/ssm
+cd /tmp/ssm
+wget https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/debian_${arch}/amazon-ssm-agent.deb
+sudo dpkg -i amazon-ssm-agent.deb
+%{endif}
+
+%{if !(os_distro == "ubuntu" && os_version == "resolute")}
+systemctl enable amazon-ssm-agent
+systemctl start amazon-ssm-agent
+%{endif}

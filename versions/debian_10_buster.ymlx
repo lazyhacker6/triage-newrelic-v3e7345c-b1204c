@@ -1,0 +1,7 @@
+osDistro: debian
+osVersion: buster
+packages:
+  - arch: amd64
+    ami: ami-001693acd462ba69b
+  - arch: arm64
+    ami: ami-003304e7bf14f24f7

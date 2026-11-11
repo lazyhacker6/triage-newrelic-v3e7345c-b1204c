@@ -1,0 +1,125 @@
+- name: (linux) (production/staging) Install CrowdStrike Falcon and NRIA
+  hosts: linux
+  # Using free strategy for parallel execution across hosts
+  # Note: any_errors_fatal is incompatible with free strategy
+  strategy: free
+  vars:
+    # Increased timeouts to handle long-running agent installation (3-5 minutes)
+    # AWS SSM already sends protocol-level keepalives, so explicit keepalive not needed
+    ansible_aws_ssm_timeout: 900   # 15 minutes (reasonable for 3-5 min operation with buffer)
+    ansible_aws_ssm_retries: 15    # Increased from 10
+  become: true
+  gather_facts: no
+  tasks:
+    # Same sudo-rs use_pty fix as the prerelease playbook: write the !use_pty
+    # drop-in via a raw `become` before the first sudo task. Resolute only; safe to re-run.
+    - name: "PRE | non-become connectivity"
+      become: false
+      when: tags.os_distro == 'ubuntu' and tags.os_version == 'resolute'
+      ansible.builtin.wait_for_connection:
+        delay: 5
+        timeout: 180
+
+    - name: "PRE | bootstrap disable sudo use_pty (raw become, idempotent)"
+      become: true
+      when: tags.os_distro == 'ubuntu' and tags.os_version == 'resolute'
+      timeout: 90
+      changed_when: false
+      failed_when: false
+      ignore_unreachable: true
+      ansible.builtin.raw: |
+        test -f /etc/sudoers.d/99-disable-use-pty || { echo 'Defaults !use_pty' > /etc/sudoers.d/99-disable-use-pty && chmod 440 /etc/sudoers.d/99-disable-use-pty; }
+
+    - name: Establish initial connection to host
+      block:
+        - name: Wait for connection to be available
+          wait_for_connection:
+            delay: 10
+            timeout: 300
+            connect_timeout: 60
+          register: initial_connection
+
+        - name: Verify connection with ping
+          ansible.builtin.ping:
+      rescue:
+        - name: Reset connection on initial failure
+          ansible.builtin.meta: reset_connection
+
+        - name: Retry connection with extended timeout
+          wait_for_connection:
+            delay: 20
+            timeout: 600
+            connect_timeout: 120
+          retries: 5
+          delay: 60
+          register: retry_connection
+          until: retry_connection is succeeded
+
+    - name: Gather facts for first time
+      ansible.builtin.setup:
+    
+    - name: Ensure 'which' command is installed
+      ansible.builtin.package:
+        name: which
+        state: present
+      when: ansible_distribution == 'Rocky'
+
+#    - name: Install crowdstrike falcon
+#      ansible.builtin.include_role:
+#        name: caos.ansible_roles.install_crowdstrike_falcon
+#      vars:
+#        falcon_client_id: "{{ lookup('env', 'CROWDSTRIKE_CLIENT_ID') }}"
+#        falcon_client_secret: "{{ lookup('env', 'CROWDSTRIKE_CLIENT_SECRET') }}"
+#        falcon_customer_id: "{{ lookup('env', 'CROWDSTRIKE_CUSTOMER_ID') }}"
+#        api_base_url: "https://api.laggar.gcw.crowdstrike.com"
+
+    - name: Install newrelic-infra agent with retry logic
+      block:
+        - name: Install newrelic-infra agent
+          ansible.builtin.include_role:
+            name: caos.ansible_roles.newrelic_cli
+          vars:
+            repo_endpoint: "{{ lookup('ansible.builtin.env', 'NRIA_REPO_ENDPOINT') }}"
+            recipe: "newrelic-infra"
+            region: "{{ lookup('ansible.builtin.env', 'NEW_RELIC_REGION') }}" # US | EU | STAGING
+            nr_api_key: "{{ lookup('ansible.builtin.env', 'NEW_RELIC_API_KEY') }}"
+            nr_account_id: "{{ lookup('ansible.builtin.env', 'NEW_RELIC_ACCOUNT_ID') }}"
+          # Note: async/poll not supported on include_role. Relies on command_timeout = 300s in ansible.cfg
+      rescue:
+        - name: Log connection failure for observability
+          ansible.builtin.debug:
+            msg: "WARNING: SSM connection lost during agent install on {{ inventory_hostname }}. Attempting recovery..."
+
+        - name: Connection lost during agent install - reset connection
+          ansible.builtin.meta: reset_connection
+
+        - name: Wait for connection to recover after reset
+          wait_for_connection:
+            delay: 10
+            timeout: 300
+            connect_timeout: 60
+          retries: 3
+          delay: 30
+          register: recovery_connection
+          until: recovery_connection is succeeded
+
+        - name: Verify connection is working
+          ansible.builtin.ping:
+          retries: 3
+          delay: 10
+
+        - name: Retry agent installation after connection recovery
+          ansible.builtin.include_role:
+            name: caos.ansible_roles.newrelic_cli
+          vars:
+            repo_endpoint: "{{ lookup('ansible.builtin.env', 'NRIA_REPO_ENDPOINT') }}"
+            recipe: "newrelic-infra"
+            region: "{{ lookup('ansible.builtin.env', 'NEW_RELIC_REGION') }}" # US | EU | STAGING
+            nr_api_key: "{{ lookup('ansible.builtin.env', 'NEW_RELIC_API_KEY') }}"
+            nr_account_id: "{{ lookup('ansible.builtin.env', 'NEW_RELIC_ACCOUNT_ID') }}"
+          register: retry_result
+
+        - name: Log successful recovery
+          ansible.builtin.debug:
+            msg: "SUCCESS: Agent installation completed after connection recovery on {{ inventory_hostname }}"
+          when: retry_result is succeeded

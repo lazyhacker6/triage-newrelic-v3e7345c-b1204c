@@ -1,0 +1,14 @@
+.PHONY: generateMatrices
+generateMatrices:
+	pip3 install -r requirements.txt
+	python3 strategyMatrix.py > strategyMatrix.json
+	# work only with missing packages either in prod or staging
+	cat strategyMatrix.json | jq 'map(select(.isProduction == false or .isStaging == false))' -c > prodAndStagingMatrix.json
+	cat prodAndStagingMatrix.json | jq 'map(select(.osDistro == "sles"))' -c > slesMatrix.json
+	cat prodAndStagingMatrix.json | jq 'map(select(.osDistro != "sles"))' -c > linuxAndWindowsMatrix.json
+	cat prodAndStagingMatrix.json | jq 'map(select(.osDistro == "windows-server"))' -c > windowsMatrix.json
+	cat prodAndStagingMatrix.json | jq 'map(select(.osDistro == "debian" or .osDistro == "ubuntu"))' -c > aptMatrix.json
+	cat prodAndStagingMatrix.json | jq 'map(select(.osDistro == "amazonlinux" or .osDistro == "centos" or .osDistro == "rockylinux"))' -c > yumMatrix.json
+	# used to generate proper schemas in schema.linux.py
+	cat strategyMatrix.json | jq 'map(select(.isStaging == false))' -c > stagingMatrix.json
+	cat strategyMatrix.json | jq 'map(select(.isProduction == false))' -c > productionMatrix.json

@@ -1,0 +1,7 @@
+osDistro: centos
+osVersion: 9
+packages:
+  - arch: x86_64
+    ami: ami-0008a45426822f82f
+  - arch: aarch64
+    ami: ami-0056c0bf0ae11619c
