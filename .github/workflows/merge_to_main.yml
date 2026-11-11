@@ -21,7 +21,7 @@ jobs:
     steps:
       - name: Get PR number
         # commit sha from v6 tag (moving target) - verify with: git ls-remote https://github.com/actions/github-script v6
-        uses: actions/github-script@00f12e3e20659f42342b1c0226afda7f7c042325
+        uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410
         id: get_pr_number
         with:
           script: |
